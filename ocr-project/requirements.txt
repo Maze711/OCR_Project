@@ -1,0 +1,13 @@
+# Core dependencies
+tensorflow==2.15.0
+opencv-python
+numpy
+pillow
+matplotlib
+
+# Visualization & Logging
+tensorboard
+tensorboard-plugin-profile
+
+# Utility libraries
+argparse

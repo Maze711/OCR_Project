@@ -7,12 +7,13 @@ from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, Reshape, Bidire
 from tensorflow.keras.optimizers import AdamW
 from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 from tensorflow.keras import backend as K
+from tensorflow_addons.optimizers import AdamW
 import random
 import string
 from PIL import Image, ImageDraw, ImageFont
 import datetime
-import gc
 import shutil
+import pandas as pd
 
 CHARACTERS = string.ascii_letters + string.digits + " -'.,"
 NUM_CHARS = len(CHARACTERS)
@@ -38,99 +39,10 @@ def ctc_lambda_func(args):
     y_pred, labels, input_length, label_length = args
     return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
 
-def generate_text_sample():
-    cursive_patterns = [
-        "flourish", "script", "elegant", "brush", "swing",
-        "grace", "flow", "curve", "loop", "connect"
-    ]
-    
-    if random.random() < 0.7:
-        parts = [
-            ("fl", "ow", "ing"),
-            ("br", "ush", ""),
-            ("sc", "rip", "t"),
-            ("co", "nn", "ect"),
-            ("cur", "ve", "")
-        ]
-        base = random.choice(parts)
-        return base[0] + base[1] + base[2]
-    else:
-        return ''.join(random.choices(string.ascii_uppercase, k=random.randint(3, 6)))
-
-def generate_image(text, image_path):
-    img = Image.new('L', (IMAGE_WIDTH, IMAGE_HEIGHT), 255)
-    draw = ImageDraw.Draw(img)
-    
-    try:
-        if text.islower():
-            cursive_fonts = [
-                # "fonts/AlexBrush-Regular.ttf",
-                # "fonts/DancingScript-Regular.ttf", 
-                "fonts/GreatVibes-Regular.ttf"
-            ]
-            selected_font = random.choice(cursive_fonts)
-            font = ImageFont.truetype(selected_font, size=32)
-            slant = random.randint(-30, 30)
-            img = img.transform(
-                img.size, 
-                Image.AFFINE, 
-                (1, slant/35, random.randint(-10, 10),
-                 0, 1, random.randint(-5, 5))
-            )
-            draw = ImageDraw.Draw(img)
-            x, y = 15, 20
-        else:
-            font = ImageFont.truetype("fonts/ARIAL.ttf", size=28)
-            bbox = font.getbbox(text)
-            text_width = bbox[2] - bbox[0]
-            x = (IMAGE_WIDTH - text_width) // 2
-            y = (IMAGE_HEIGHT - 40) // 2
-            
-        draw.text((x, y), text, font=font, fill=0)
-        img.save(image_path, "PNG")
-        return True
-
-    except Exception as e:
-        print(f"Error in image generation: {e}")
-        return False
-
-def generate_dataset(num_samples, folder):
-    samples = []
-    os.makedirs(os.path.join(dataset_dir, folder), exist_ok=True)
-    
-    for i in range(num_samples):
-        text = generate_text_sample()
-        img_path = os.path.join(dataset_dir, folder, f"{folder}_{i}.png")
-        generate_image(text, img_path)
-        samples.append((img_path, text))
-    
-    return samples
-
-def augment_image(img):
-    # Add Gaussian noise
-    if random.random() < 0.3:  # Lower probability
-        noise = np.random.normal(0, 0.07, img.shape)  # Lower stddev
-        img = img + noise
-        img = np.clip(img, 0, 1)
-    # Add blur
-    if random.random() < 0.3:  # Lower probability
-        ksize = random.choice([3])
-        img = cv2.GaussianBlur(img, (ksize, ksize), 0)
-    # Add grain (salt & pepper)
-    if random.random() < 0.15:  # Lower probability
-        amount = 0.01  # Lower amount
-        num_salt = np.ceil(amount * img.size * 0.5)
-        num_pepper = np.ceil(amount * img.size * 0.5)
-        coords = [np.random.randint(0, i, int(num_salt)) for i in img.shape]
-        img[tuple(coords)] = 1
-        coords = [np.random.randint(0, i, int(num_pepper)) for i in img.shape]
-        img[tuple(coords)] = 0
-    return img
-
 def prepare_data(samples):
     images = []
     texts = []
-    
+    feature_width = IMAGE_WIDTH // 4  # Or set this after printing actual model output
     for img_path, text in samples:
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         if img is None:
@@ -138,13 +50,14 @@ def prepare_data(samples):
             
         img = cv2.resize(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
         img = (img / 255.0).astype(np.float32)
-        # img = augment_image(img)  # <-- Add this line
         img = np.expand_dims(img, axis=-1)
-        images.append(img)
 
         text_labels = [CHARACTERS.index(c) for c in text if c in CHARACTERS]
-        if not text_labels:
+        if len(text_labels) > feature_width:
+            print(f"Skipping sample: label too long ({len(text_labels)} > {feature_width}) for {img_path}")
             continue
+        images.append(img)
+
         texts.append(text_labels)
     
     max_text_len = max(len(t) for t in texts)
@@ -153,35 +66,58 @@ def prepare_data(samples):
         padded_texts[i, :len(text)] = text
     
     feature_width = IMAGE_WIDTH // 4
-    input_length = np.ones((len(images), 1), dtype='int64') * feature_width
-    label_length = np.array([[len(t)] for t in texts], dtype='int64')
+    input_length = np.ones((len(images), 1), dtype='int32') * feature_width
+    label_length = np.array([[len(t)] for t in texts], dtype='int32')
+
     
     return np.array(images), padded_texts, input_length, label_length
 
 def build_ocr_model():
     input_img = Input(shape=(IMAGE_HEIGHT, IMAGE_WIDTH, 1))
-    
-    x = Conv2D(64, (5,5), activation='swish', padding='same')(input_img)
+
+    # --- CNN Feature Extractor ---
+    x = Conv2D(64, (3,3), activation='swish', padding='same')(input_img)
     x = BatchNormalization()(x)
     x = MaxPooling2D((2,2))(x)
-    
+    x = SpatialDropout2D(0.2)(x)
+
     x = Conv2D(128, (3,3), activation='swish', padding='same')(x)
     x = BatchNormalization()(x)
+    x = MaxPooling2D((2,2))(x)
+    x = SpatialDropout2D(0.2)(x)
+
+    x = Conv2D(256, (3,3), activation='swish', padding='same')(x)
+    x = BatchNormalization()(x)
     x = MaxPooling2D((2,1))(x)
-    
-    _, h, w, c = x.shape
-    x = Reshape((w, h * c))(x)
+    x = SpatialDropout2D(0.3)(x)
+
+    # --- Debugging: Print the shape after CNN ---
+    print(x.shape)
+
+    # --- Reshape for RNN: use width as time steps (conv output shape: (batch, h, w, c)) ---
+    conv_shape = K.int_shape(x)  # (None, h, w, c)
+    if conv_shape is None:
+        # fallback — try dynamic shape if needed
+        conv_shape = tf.shape(x)
+
+    time_steps = conv_shape[2]  # width -> time dimension for RNN
+    features = conv_shape[1] * conv_shape[3]  # combine height and channels into feature vector
+
+    x = Reshape((time_steps, features))(x)
+
+    # --- BiLSTM Layers ---
+    x = Bidirectional(LSTM(256, return_sequences=True, dropout=0.3))(x)
     x = Bidirectional(LSTM(128, return_sequences=True, dropout=0.3))(x)
     x = AttentionLayer()(x)
     x = Bidirectional(LSTM(96, return_sequences=True, dropout=0.3))(x)
 
     output = Dense(NUM_CHARS + 1, activation='softmax')(x)
-    
+
     labels = Input(name='labels', shape=(None,), dtype='int32')
     input_length = Input(name='input_length', shape=(1,), dtype='int64')
     label_length = Input(name='label_length', shape=(1,), dtype='int64')
-    
-    loss_out = Lambda(ctc_lambda_func, name='ctc')([output, labels, input_length, label_length])    
+
+    loss_out = Lambda(ctc_lambda_func, name='ctc')([output, labels, input_length, label_length])
     train_model = Model(
         inputs=[input_img, labels, input_length, label_length],
         outputs=loss_out
@@ -190,9 +126,9 @@ def build_ocr_model():
         optimizer=AdamW(learning_rate=1e-4, weight_decay=1e-5, beta_1=0.9, beta_2=0.999),
         loss={'ctc': lambda y_true, y_pred: y_pred}
     )
-    
+
     pred_model = Model(inputs=input_img, outputs=output)
-    
+
     return train_model, pred_model
 
 class TerminalLogger(tf.keras.callbacks.Callback):
@@ -304,10 +240,22 @@ class ValidationCallback(tf.keras.callbacks.Callback):
         # Save best accuracy model
         if word_acc > self.best_accuracy:
             self.best_accuracy = word_acc
-            self.pred_model.save(os.path.join(models_dir, 'ocr_model_best_accuracy.h5'))
-            self.model.save(os.path.join(models_dir, "ocr_model_final.h5"))
-            self.pred_model.save(os.path.join(models_dir, 'ocr_pred_model.h5'))
-            self.model.save_weights(os.path.join(models_dir, "ocr_model_best_weights.h5"))
+            self.pred_model.save(os.path.join(models_dir, 'ocr_model_best_accuracy.keras'))
+            self.model.save(os.path.join(models_dir, "ocr_model_final.keras"))
+            self.pred_model.save(os.path.join(models_dir, 'ocr_pred_model.keras'))
+            self.model.save_weights(os.path.join(models_dir, "ocr_model_best_weights.keras"))
+
+
+def load_samples(label_csv_path, images_folder):
+    df = pd.read_csv(label_csv_path)
+    samples = []
+    for _, row in df.iterrows():
+        img_filename = row['filename'] if 'filename' in row else row[0]
+        label = row['word'] if 'word' in row else row[1]
+        img_path = os.path.join(images_folder, img_filename)
+        if os.path.exists(img_path):
+            samples.append((img_path, str(label)))
+    return samples
 
 
 # Delete and recreate ocr_logs for a fresh TensorBoard run
@@ -316,14 +264,28 @@ if os.path.exists(logs_dir):
 os.makedirs(logs_dir, exist_ok=True)
 
 if __name__ == "__main__":
-    train_samples = generate_dataset(5000, 'train')  # Increased to 1500 samples
-    test_samples = generate_dataset(1000, 'test')
-    
+
+    base_dir = r"f:\Python Projects\OCR_Project\ocr-project\backend\ocr_dataset"
+
+    train_samples = load_samples(
+        os.path.join(base_dir, "Training", "training_labels.csv"),
+        os.path.join(base_dir, "Training", "training_words")
+    )
+    val_samples = load_samples(
+        os.path.join(base_dir, "Validation", "validation_labels.csv"),
+        os.path.join(base_dir, "Validation", "validation_words")
+    )
+    test_samples = load_samples(
+        os.path.join(base_dir, "Testing", "testing_labels.csv"),
+        os.path.join(base_dir, "Testing", "testing_words")
+    )
+
     X_train, y_train, il_train, ll_train = prepare_data(train_samples)
     X_test, y_test, il_test, ll_test = prepare_data(test_samples)
+    X_val, y_val, il_val, ll_val = prepare_data(val_samples)
 
-    final_weights_path = os.path.join(models_dir, "ocr_model_final_weights.h5")
-    checkpoint_weights_path = os.path.join(models_dir, "ocr_model_best_weights.h5")
+    final_weights_path = os.path.join(models_dir, "ocr_model_final_weights.keras")
+    checkpoint_weights_path = os.path.join(models_dir, "ocr_model_best_weights.keras")
 
     # Always rebuild the model and load weights if available
     if os.path.exists(final_weights_path):
@@ -344,7 +306,7 @@ if __name__ == "__main__":
 
     checkpoint_callback = ModelCheckpoint(
         filepath=checkpoint_weights_path,
-        save_best_only=False,
+        save_best_only=True,
         save_weights_only=True,
         verbose=1
     )
@@ -352,14 +314,14 @@ if __name__ == "__main__":
     reduce_lr_callback = ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
-        patience=5,
+        patience=50,
         min_lr=1e-6,
         verbose=1
     )
 
     early_stop = EarlyStopping(
         monitor='val_loss',
-        patience=5,
+        patience=20,
         restore_best_weights=True
     )
 
@@ -367,8 +329,8 @@ if __name__ == "__main__":
         [X_train, y_train, il_train, ll_train],
         np.zeros(len(X_train)),
         validation_data=([X_test, y_test, il_test, ll_test], np.zeros(len(X_test))),
-        epochs=50,
-        batch_size=32,
+        epochs=500,
+        batch_size=60,
         callbacks=[
             tensorboard_callback,
             terminal_logger,

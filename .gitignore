@@ -6,3 +6,5 @@ ocr-project/backend/data/
 ocr-project/backend/logs/
 ocr-project/backend/ocr_dataset/
 ocr-project/backend/ocr_logs/
+
+ocr-project/backend/sample_logs/

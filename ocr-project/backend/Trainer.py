@@ -14,18 +14,23 @@ from PIL import Image, ImageDraw, ImageFont
 import datetime
 import shutil
 import pandas as pd
+import difflib
 
 CHARACTERS = string.ascii_letters + string.digits + " -'.,"
 NUM_CHARS = len(CHARACTERS)
 BLANK_TOKEN = NUM_CHARS
 IMAGE_WIDTH, IMAGE_HEIGHT = 160, 64
 
-dataset_dir = 'ocr_dataset'
-logs_dir = 'ocr_logs'
-models_dir = 'ocr_models'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+dataset_dir = os.path.join(BASE_DIR, 'ocr_dataset')
+logs_dir = os.path.join(BASE_DIR, 'ocr_logs')
+models_dir = os.path.join(BASE_DIR, 'ocr_models')
+sample_logs_dir = os.path.join(BASE_DIR, 'sample_logs')
 os.makedirs(dataset_dir, exist_ok=True)
 os.makedirs(logs_dir, exist_ok=True)
 os.makedirs(models_dir, exist_ok=True)
+os.makedirs(sample_logs_dir, exist_ok=True)
 
 class AttentionLayer(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
@@ -185,6 +190,7 @@ class ValidationCallback(tf.keras.callbacks.Callback):
         self.y_val = y_val
         self.writer = tf.summary.create_file_writer(log_dir)
         self.best_accuracy = 0.0
+        self.best_char_accuracy = 0.0
 
     def decode_prediction(self, pred):
         input_len = np.ones(pred.shape[0]) * pred.shape[1]
@@ -198,6 +204,7 @@ class ValidationCallback(tf.keras.callbacks.Callback):
         TP, FP, FN = 0, 0, 0
         total = min(10, len(self.X_val))
 
+        char_accs = []
         for i in range(total):
             img = (self.X_val[i] * 255).astype(np.uint8).squeeze()
             pred = self.pred_model.predict(np.expand_dims(self.X_val[i], axis=0))
@@ -224,6 +231,9 @@ class ValidationCallback(tf.keras.callbacks.Callback):
             img_arr = np.array(canvas).astype(np.float32) / 255.0
             sample_images.append(img_arr)
 
+            char_accs.append(char_accuracy(pred_text, true_text))
+        avg_char_acc = np.mean(char_accs)
+
         word_acc = correct / total if total > 0 else 0.0
         precision = TP / (TP + FP) if (TP + FP) > 0 else 0.0
         recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
@@ -235,6 +245,7 @@ class ValidationCallback(tf.keras.callbacks.Callback):
             tf.summary.scalar('val_precision', precision, step=epoch)
             tf.summary.scalar('val_recall', recall, step=epoch)
             tf.summary.scalar('val_f1_score', f1_score, step=epoch)
+            tf.summary.scalar('val_char_accuracy', avg_char_acc, step=epoch)
             self.writer.flush()
 
         # Save best accuracy model
@@ -244,6 +255,13 @@ class ValidationCallback(tf.keras.callbacks.Callback):
             self.model.save(os.path.join(models_dir, "ocr_model_final.keras"))
             self.pred_model.save(os.path.join(models_dir, 'ocr_pred_model.keras'))
             self.model.save_weights(os.path.join(models_dir, "ocr_model_best_weights.keras"))
+
+        if avg_char_acc > self.best_char_accuracy:
+            self.best_char_accuracy = avg_char_acc
+            self.pred_model.save(os.path.join(models_dir, 'ocr_model_best_char_accuracy.keras'))
+            self.model.save(os.path.join(models_dir, "ocr_model_final_char.keras"))
+            self.pred_model.save(os.path.join(models_dir, 'ocr_pred_model_char.keras'))
+            self.model.save_weights(os.path.join(models_dir, "ocr_model_best_char_weights.keras"))
 
 
 def load_samples(label_csv_path, images_folder):
@@ -263,26 +281,60 @@ if os.path.exists(logs_dir):
     shutil.rmtree(logs_dir)
 os.makedirs(logs_dir, exist_ok=True)
 
+def log_training_samples(samples, log_path):
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write("Training samples used for this run:\n")
+        for img_path, label in samples:
+            f.write(f"{img_path}, {label}\n")
+    print(f"Training samples logged to {log_path}")
+
+def copy_training_images(samples, dest_folder):
+    os.makedirs(dest_folder, exist_ok=True)
+    for img_path, label in samples:
+        try:
+            shutil.copy(img_path, dest_folder)
+        except Exception as e:
+            print(f"Failed to copy {img_path}: {e}")
+    print(f"Copied {len(samples)} training images to {dest_folder}")
+
+def char_accuracy(pred, true):
+    # pred and true are strings
+    matcher = difflib.SequenceMatcher(None, pred, true)
+    return matcher.ratio()  # returns float between 0 and 1
+
 if __name__ == "__main__":
 
-    base_dir = r"f:\Python Projects\OCR_Project\ocr-project\backend\ocr_dataset"
+    base_dir = dataset_dir
 
-    train_samples = load_samples(
-        os.path.join(base_dir, "Training", "training_labels.csv"),
-        os.path.join(base_dir, "Training", "training_words")
-    )
-    val_samples = load_samples(
-        os.path.join(base_dir, "Validation", "validation_labels.csv"),
-        os.path.join(base_dir, "Validation", "validation_words")
-    )
-    test_samples = load_samples(
-        os.path.join(base_dir, "Testing", "testing_labels.csv"),
-        os.path.join(base_dir, "Testing", "testing_words")
+    # Load all samples from training set
+    all_samples = load_samples(
+        os.path.join(dataset_dir, "Training", "training_labels.csv"),
+        os.path.join(dataset_dir, "Training", "training_words")
     )
 
+    # Shuffle samples for randomness
+    random.shuffle(all_samples)
+
+    # Split into train/val/test (e.g., 80% train, 10% val, 10% test)
+    num_total = len(all_samples)
+    num_train = int(0.8 * num_total)
+    num_val = int(0.1 * num_total)
+    num_test = num_total - num_train - num_val
+
+    train_samples = all_samples[:num_train]
+    val_samples = all_samples[num_train:num_train+num_val]
+    test_samples = all_samples[num_train+num_val:]    
+
+    train_samples_log_path = os.path.join(sample_logs_dir, "training_samples.txt")
+    log_training_samples(train_samples, train_samples_log_path)
+
+    training_images_dest = os.path.join(sample_logs_dir, "training_images")
+    copy_training_images(train_samples, training_images_dest)
+
+    # Prepare data
     X_train, y_train, il_train, ll_train = prepare_data(train_samples)
-    X_test, y_test, il_test, ll_test = prepare_data(test_samples)
     X_val, y_val, il_val, ll_val = prepare_data(val_samples)
+    X_test, y_test, il_test, ll_test = prepare_data(test_samples)
 
     final_weights_path = os.path.join(models_dir, "ocr_model_final_weights.keras")
     checkpoint_weights_path = os.path.join(models_dir, "ocr_model_best_weights.keras")
@@ -301,7 +353,7 @@ if __name__ == "__main__":
         train_model, pred_model = build_ocr_model()
 
     tensorboard_callback = TensorBoard(log_dir=logs_dir)
-    validation_callback = ValidationCallback(pred_model, X_test, y_test, logs_dir)
+    validation_callback = ValidationCallback(pred_model, X_train, y_train, logs_dir)
     terminal_logger = TerminalLogger(validation_callback=validation_callback)
 
     checkpoint_callback = ModelCheckpoint(

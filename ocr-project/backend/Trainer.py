@@ -15,6 +15,7 @@ import datetime
 import shutil
 import pandas as pd
 import difflib
+import json
 
 CHARACTERS = string.ascii_letters + string.digits + " -'.,"
 NUM_CHARS = len(CHARACTERS)
@@ -128,7 +129,7 @@ def build_ocr_model():
         outputs=loss_out
     )
     train_model.compile(
-        optimizer=AdamW(learning_rate=1e-4, weight_decay=1e-5, beta_1=0.9, beta_2=0.999),
+        optimizer=AdamW(learning_rate=2e-4, weight_decay=1e-5, beta_1=0.9, beta_2=0.999),
         loss={'ctc': lambda y_true, y_pred: y_pred}
     )
 
@@ -249,14 +250,18 @@ class ValidationCallback(tf.keras.callbacks.Callback):
             self.writer.flush()
 
         # Save best accuracy model
+        saved_this_epoch = False
+
+        # Save best accuracy model
         if word_acc > self.best_accuracy:
             self.best_accuracy = word_acc
             self.pred_model.save(os.path.join(models_dir, 'ocr_model_best_accuracy.keras'))
             self.model.save(os.path.join(models_dir, "ocr_model_final.keras"))
             self.pred_model.save(os.path.join(models_dir, 'ocr_pred_model.keras'))
             self.model.save_weights(os.path.join(models_dir, "ocr_model_best_weights.keras"))
+            saved_this_epoch = True
 
-        if avg_char_acc > self.best_char_accuracy:
+        if avg_char_acc > self.best_char_accuracy and not saved_this_epoch:
             self.best_char_accuracy = avg_char_acc
             self.pred_model.save(os.path.join(models_dir, 'ocr_model_best_char_accuracy.keras'))
             self.model.save(os.path.join(models_dir, "ocr_model_final_char.keras"))
@@ -302,6 +307,31 @@ def char_accuracy(pred, true):
     matcher = difflib.SequenceMatcher(None, pred, true)
     return matcher.ratio()  # returns float between 0 and 1
 
+def save_production_model(pred_model, train_model):
+    """Save the model in a format ready for production use"""
+    prod_model_path = os.path.join(models_dir, "ocr_model_production.keras")
+    
+    # Save the prediction model
+    pred_model.save(prod_model_path)
+    
+    # Save configuration
+    config = {
+        'image_width': IMAGE_WIDTH,
+        'image_height': IMAGE_HEIGHT,
+        'characters': CHARACTERS,
+        'num_chars': NUM_CHARS,
+        'model_version': '1.0',
+        'final_word_accuracy': validation_callback.best_accuracy,
+        'final_char_accuracy': validation_callback.best_char_accuracy
+    }
+    
+    config_path = os.path.join(models_dir, "model_config.json")
+    with open(config_path, 'w') as f:
+        json.dumps(config, f)
+        
+    print(f"Saved production model to {prod_model_path}")
+    print(f"Saved model configuration to {config_path}")
+
 if __name__ == "__main__":
 
     base_dir = dataset_dir
@@ -339,22 +369,29 @@ if __name__ == "__main__":
     final_weights_path = os.path.join(models_dir, "ocr_model_final_weights.keras")
     checkpoint_weights_path = os.path.join(models_dir, "ocr_model_best_weights.keras")
 
-    # Always rebuild the model and load weights if available
-    if os.path.exists(final_weights_path):
-        print("Loading final model weights...")
-        train_model, pred_model = build_ocr_model()
-        train_model.load_weights(final_weights_path)
-    elif os.path.exists(checkpoint_weights_path):
-        print("Loading checkpoint model weights...")
-        train_model, pred_model = build_ocr_model()
-        train_model.load_weights(checkpoint_weights_path)
-    else:
-        print("Creating new model...")
-        train_model, pred_model = build_ocr_model()
+    # Replace the weights loading section
+    best_accuracy_path = os.path.join(models_dir, "ocr_model_best_weights.keras")
+    best_char_path = os.path.join(models_dir, "ocr_model_best_char_weights.keras")
 
+    # Create new model
+    train_model, pred_model = build_ocr_model()
+    
+    # Create callbacks first
     tensorboard_callback = TensorBoard(log_dir=logs_dir)
     validation_callback = ValidationCallback(pred_model, X_train, y_train, logs_dir)
     terminal_logger = TerminalLogger(validation_callback=validation_callback)
+
+    # Now load weights
+    if os.path.exists(best_accuracy_path):
+        print("Loading best word accuracy weights...")
+        train_model.load_weights(best_accuracy_path)
+        print("Current best word accuracy:", validation_callback.best_accuracy)
+    elif os.path.exists(best_char_path):
+        print("Loading best character accuracy weights...")
+        train_model.load_weights(best_char_path)
+        print("Current best character accuracy:", validation_callback.best_char_accuracy)
+    else:
+        print("No previous weights found. Starting fresh training...")
 
     checkpoint_callback = ModelCheckpoint(
         filepath=checkpoint_weights_path,
@@ -382,7 +419,7 @@ if __name__ == "__main__":
         np.zeros(len(X_train)),
         validation_data=([X_test, y_test, il_test, ll_test], np.zeros(len(X_test))),
         epochs=500,
-        batch_size=60,
+        batch_size=256,
         callbacks=[
             tensorboard_callback,
             terminal_logger,
@@ -395,3 +432,6 @@ if __name__ == "__main__":
 
     # Save final weights after training
     train_model.save_weights(final_weights_path)
+
+    # Call this at the end of training
+    save_production_model(pred_model, train_model)

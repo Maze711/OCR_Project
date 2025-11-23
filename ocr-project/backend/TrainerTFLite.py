@@ -8,7 +8,7 @@ from tensorflow.keras.callbacks import (
 from TrainerComponent.model_builder import build_ocr_model_tflite_compatible
 from TrainerComponent.data_utils import prepare_data, load_samples, NUM_CHARS, IMAGE_WIDTH, IMAGE_HEIGHT
 from TrainerComponent.callbacks import TerminalLogger, ValidationCallback
-from TrainerComponent.tflite_utils import convert_to_tflite_with_flex, test_tflite_model
+from TrainerComponent.tflite_utils import convert_to_tflite_optimized, test_tflite_model
 import shutil
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +36,7 @@ if __name__ == "__main__":
     if len(all_samples) == 0:
         print("❌ No training samples found!")
         exit(1)
+    
     random.shuffle(all_samples)
     num_total = len(all_samples)
     num_train = int(0.8 * num_total)
@@ -44,15 +45,21 @@ if __name__ == "__main__":
     val_samples = all_samples[num_train:num_train+num_val]
     test_samples = all_samples[num_train+num_val:]
 
-    # Prepare data
+    # Prepare data for training
+    print("🔄 Preparing training data ...")
     X_train, y_train, il_train, ll_train = prepare_data(train_samples)
     X_val, y_val, il_val, ll_val = prepare_data(val_samples)
     X_test, y_test, il_test, ll_test = prepare_data(test_samples)
 
-    print(f"Training data: {X_train.shape}")
-    print(f"Validation data: {X_val.shape}")
+    # Check if we have valid data
+    if len(X_train) == 0 or len(X_val) == 0:
+        print("❌ No valid training or validation data after preprocessing!")
+        exit(1)
 
-    # Build TFLite compatible model
+    print(f"✅ Training data: {X_train.shape}")
+    print(f"✅ Validation data: {X_val.shape}")
+
+    # Build TFLite compatible model with CTC shortcut
     train_model, pred_model, time_steps = build_ocr_model_tflite_compatible()
     print(f"📐 Model time steps: {time_steps}")
     print(f"📐 Number of characters: {NUM_CHARS}")
@@ -63,9 +70,13 @@ if __name__ == "__main__":
 
     # Define callbacks
     checkpoint_path = os.path.join(models_dir, "best_model.keras")
+    print("🚀 Starting balanced training...")
+    print(f"📊 Logs will be saved to: {logs_dir}")
+
+    # Conservative callbacks
     callbacks = [
         TensorBoard(log_dir=logs_dir, histogram_freq=1),
-        TerminalLogger(validation_callback=validation_callback),  # <-- Pass the callback here
+        TerminalLogger(validation_callback=validation_callback),
         ModelCheckpoint(
             filepath=checkpoint_path,
             save_best_only=True,
@@ -76,41 +87,46 @@ if __name__ == "__main__":
         ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
-            patience=10,
-            min_lr=1e-6,
+            patience=8,
+            min_lr=1e-7,
             verbose=1
         ),
         EarlyStopping(
             monitor='val_loss',
-            patience=20,
-            restore_best_weights=True
+            patience=25,
+            restore_best_weights=True,
+            min_delta=0.001
         ),
-        validation_callback  # <-- Add this to callbacks if you want TensorBoard metrics
+        validation_callback
     ]
 
-    print("🚀 Starting training...")
+    print("🚀 Starting training with improved architecture...")
     print(f"📊 Logs will be saved to: {logs_dir}")
 
-    history = train_model.fit(
-        [X_train, y_train, il_train, ll_train],
-        np.zeros(len(X_train)),
-        validation_data=([X_val, y_val, il_val, ll_val], np.zeros(len(X_val))),
-        epochs=100,
-        batch_size=32,
-        callbacks=callbacks,
-        verbose=1
-    )
+    try:
+        history = train_model.fit(
+            [X_train, y_train, il_train, ll_train],
+            np.zeros(len(X_train)),
+            validation_data=([X_val, y_val, il_val, ll_val], np.zeros(len(X_val))),
+            epochs=100,
+            batch_size=32,
+            callbacks=callbacks,
+            verbose=1
+        )
 
-    if os.path.exists(checkpoint_path):
-        print("📥 Loading best model...")
-        pred_model.load_weights(checkpoint_path)
+        if os.path.exists(checkpoint_path):
+            print("📥 Loading best model...")
+            pred_model.load_weights(checkpoint_path)
 
-    # Convert to TFLite
-    print("🔄 Converting to TFLite...")
-    tflite_path = convert_to_tflite_with_flex(pred_model, models_dir)
+        # Convert to optimized TFLite
+        print("🔄 Converting to optimized TFLite...")
+        tflite_path = convert_to_tflite_optimized(pred_model, models_dir, X_train)
 
-    # Test the TFLite model
-    test_tflite_model(tflite_path, X_test)
+        # Test the TFLite model
+        if tflite_path:
+            test_tflite_model(tflite_path, X_test)
 
-    print(f"✅ Training completed! TFLite model saved to: {tflite_path}")
-    print(f"📊 Training logs saved to: {logs_dir}")
+        print(f"✅ Training completed! TFLite model saved to: {tflite_path}")
+        
+    except Exception as e:
+        print(f"❌ Training failed: {e}")

@@ -27,12 +27,20 @@ if os.path.exists(logs_dir):
 os.makedirs(logs_dir, exist_ok=True)
 
 if __name__ == "__main__":
-    # Load data
-    all_samples = load_samples(
+    # Load real samples
+    real_samples = load_samples(
         os.path.join(dataset_dir, "Training", "training_labels.csv"),
         os.path.join(dataset_dir, "Training", "training_words")
     )
+    # Load synthetic samples
+    synthetic_samples = load_samples(
+        os.path.join(dataset_dir, "Synthetic", "synthetic_labels.csv"),
+        os.path.join(dataset_dir, "Synthetic")
+    )
+    # Combine and shuffle
+    all_samples = real_samples + synthetic_samples
     print(f"Total samples loaded: {len(all_samples)}")
+    # print([len(text) for _, text in all_samples])
     if len(all_samples) == 0:
         print("❌ No training samples found!")
         exit(1)
@@ -51,6 +59,11 @@ if __name__ == "__main__":
 
     print(f"Training data: {X_train.shape}")
     print(f"Validation data: {X_val.shape}")
+    # print(X_train.shape, y_train.shape, il_train.shape, ll_train.shape)
+    # print("Max train label length:", np.max(ll_train))
+    # print("Max val label length:", np.max(ll_val))
+    # print("Train samples:", X_train.shape[0])
+    # print("Val samples:", X_val.shape[0])
 
     # Build TFLite compatible model
     train_model, pred_model, time_steps = build_ocr_model_tflite_compatible()

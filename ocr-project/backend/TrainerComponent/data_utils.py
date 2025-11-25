@@ -7,7 +7,7 @@ import os
 CHARACTERS = string.ascii_letters + string.digits + " -'.,:"
 NUM_CHARS = len(CHARACTERS)
 BLANK_TOKEN = NUM_CHARS
-IMAGE_WIDTH, IMAGE_HEIGHT = 160, 64
+IMAGE_WIDTH, IMAGE_HEIGHT = 1024, 64  # Now feature_width = 128
 
 def ctc_lambda_func(args):
     from tensorflow.keras import backend as K
@@ -43,9 +43,17 @@ def prepare_data(samples):
 def load_samples(label_csv_path, images_folder):
     df = pd.read_csv(label_csv_path)
     samples = []
+    # Support both 'MEDICINE_NAME' and 'NOTE_TEXT' columns
+    label_col = None
+    for col in ['MEDICINE_NAME', 'NOTE_TEXT', 'label', 'LABEL', 'text']:
+        if col in df.columns:
+            label_col = col
+            break
+    if label_col is None:
+        raise ValueError(f"No valid label column found in {label_csv_path}")
     for _, row in df.iterrows():
         img_filename = row['IMAGE']
-        label = str(row['MEDICINE_NAME'])
+        label = str(row[label_col])
         img_path = os.path.join(images_folder, img_filename)
         if os.path.exists(img_path):
             samples.append((img_path, label))

@@ -76,6 +76,10 @@ if __name__ == "__main__":
 
     # Define callbacks
     checkpoint_path = os.path.join(models_dir, "best_model.keras")
+    if os.path.exists(checkpoint_path):
+        print("📥 Restoring best model weights for training...")
+        train_model.load_weights(checkpoint_path)
+
     callbacks = [
         TensorBoard(log_dir=logs_dir, histogram_freq=1),
         TerminalLogger(validation_callback=validation_callback),  # <-- Pass the callback here

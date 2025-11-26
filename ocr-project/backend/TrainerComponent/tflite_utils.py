@@ -34,6 +34,7 @@ def test_tflite_model(tflite_path, test_images):
     output_details = interpreter.get_output_details()
     print(f"📊 Input details: {input_details[0]}")
     print(f"📊 Output details: {output_details[0]}")
+    print(f"📊 Output shape (should be [1, time_steps, num_classes]): {output_details[0]['shape']}")
     if len(test_images) > 0:
         test_image = test_images[0:1]
         print(f"🧪 Test image shape: {test_image.shape}")

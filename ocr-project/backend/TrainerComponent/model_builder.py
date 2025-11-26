@@ -26,8 +26,15 @@ def build_ocr_model_tflite_compatible():
 
     # Column-wise max pooling
     x = Lambda(lambda x: tf.reduce_max(x, axis=1))(x)
+    # Remove dynamic reshape Lambda
+    # x = Lambda(lambda x: tf.reshape(x, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2]]))(x)
 
-    x = Reshape((x.shape[1], x.shape[2]))(x)
+    # Calculate time_steps statically
+    time_steps = IMAGE_WIDTH // 4  # Adjust if your pooling changes this
+
+    # Explicit reshape for TFLite compatibility
+    x = Reshape((time_steps, x.shape[-1]))(x)
+
     x = Bidirectional(GRU(64, return_sequences=True, dropout=0.2))(x)
     x = Bidirectional(GRU(48, return_sequences=True, dropout=0.2))(x)
 
@@ -45,4 +52,4 @@ def build_ocr_model_tflite_compatible():
         loss={'ctc': lambda y_true, y_pred: y_pred}
     )
     pred_model = tf.keras.models.Model(inputs=input_img, outputs=output)
-    return train_model, pred_model, x.shape[1]
+    return train_model, pred_model, time_steps

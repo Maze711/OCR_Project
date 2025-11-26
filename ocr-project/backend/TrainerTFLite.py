@@ -70,6 +70,7 @@ if __name__ == "__main__":
     print(f"📐 Model time steps: {time_steps}")
     print(f"📐 Number of characters: {NUM_CHARS}")
     print(f"📐 Expected output shape: (batch_size, {time_steps}, {NUM_CHARS + 1})")
+    print(f"📐 Actual pred_model output shape: {pred_model.output_shape}")
 
     # Before defining callbacks
     validation_callback = ValidationCallback(pred_model, X_val, y_val, logs_dir)
@@ -112,7 +113,7 @@ if __name__ == "__main__":
         [X_train, y_train, il_train, ll_train],
         np.zeros(len(X_train)),
         validation_data=([X_val, y_val, il_val, ll_val], np.zeros(len(X_val))),
-        epochs=100,
+        epochs=1,
         batch_size=32,
         callbacks=callbacks,
         verbose=1
@@ -125,6 +126,13 @@ if __name__ == "__main__":
     # Convert to TFLite
     print("🔄 Converting to TFLite...")
     tflite_path = convert_to_tflite_with_flex(pred_model, models_dir)
+
+    # Check TFLite output shape
+    import tensorflow as tf
+    interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    interpreter.allocate_tensors()
+    output_details = interpreter.get_output_details()
+    print(f"📊 TFLite output shape: {output_details[0]['shape']}")  # <-- Add this line
 
     # Test the TFLite model
     test_tflite_model(tflite_path, X_test)

@@ -26,6 +26,24 @@ if os.path.exists(logs_dir):
     shutil.rmtree(logs_dir)
 os.makedirs(logs_dir, exist_ok=True)
 
+class SaveKerasOnBest(tf.keras.callbacks.Callback):
+    def __init__(self, checkpoint_path, keras_path):
+        super().__init__()
+        self.checkpoint_path = checkpoint_path
+        self.keras_path = keras_path
+        self.last_best_loss = None
+
+    def on_epoch_end(self, epoch, logs=None):
+        # Only copy if the checkpoint file exists and val_loss improved
+        if os.path.exists(self.checkpoint_path):
+            current_loss = logs.get('val_loss')
+            if self.last_best_loss is None or (current_loss is not None and current_loss < self.last_best_loss):
+                # Copy best_model.keras to ocr_model_keras.keras
+                import shutil
+                shutil.copy2(self.checkpoint_path, self.keras_path)
+                print(f"📦 Saved best Keras model to: {self.keras_path}")
+                self.last_best_loss = current_loss
+
 if __name__ == "__main__":
     # Load real samples
     real_samples = load_samples(
@@ -37,20 +55,23 @@ if __name__ == "__main__":
         os.path.join(dataset_dir, "Synthetic", "synthetic_labels.csv"),
         os.path.join(dataset_dir, "Synthetic")
     )
-    # Combine and shuffle
+    # Use only 200 synthetic samples
+    synthetic_samples = synthetic_samples[:100]
+
+    # Combine samples
     all_samples = real_samples + synthetic_samples
     print(f"Total samples loaded: {len(all_samples)}")
-    # print([len(text) for _, text in all_samples])
     if len(all_samples) == 0:
-        print("❌ No training samples found!")
+        print("No samples found!")
         exit(1)
     random.shuffle(all_samples)
     num_total = len(all_samples)
     num_train = int(0.8 * num_total)
-    num_val = int(0.1 * num_total)
+    num_val = min(500, int(0.1 * num_total))
+    num_test = min(500, num_total - num_train - num_val)
     train_samples = all_samples[:num_train]
     val_samples = all_samples[num_train:num_train+num_val]
-    test_samples = all_samples[num_train+num_val:]
+    test_samples = all_samples[num_train+num_val:num_train+num_val+num_test]
 
     # Prepare data
     X_train, y_train, il_train, ll_train = prepare_data(train_samples)
@@ -77,6 +98,7 @@ if __name__ == "__main__":
 
     # Define callbacks
     checkpoint_path = os.path.join(models_dir, "best_model.keras")
+    keras_model_path = os.path.join(models_dir, "ocr_model_keras.keras")
     if os.path.exists(checkpoint_path):
         print("📥 Restoring best model weights for training...")
         train_model.load_weights(checkpoint_path)
@@ -91,6 +113,7 @@ if __name__ == "__main__":
             monitor='val_loss',
             verbose=1
         ),
+        SaveKerasOnBest(checkpoint_path, keras_model_path),  # <-- Add this callback
         ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
@@ -98,11 +121,11 @@ if __name__ == "__main__":
             min_lr=1e-6,
             verbose=1
         ),
-        EarlyStopping(
-            monitor='val_loss',
-            patience=20,
-            restore_best_weights=True
-        ),
+        # EarlyStopping(
+        #     monitor='val_loss',
+        #     patience=10,
+        #     restore_best_weights=True
+        # ),
         validation_callback  # <-- Add this to callbacks if you want TensorBoard metrics
     ]
 
@@ -113,8 +136,8 @@ if __name__ == "__main__":
         [X_train, y_train, il_train, ll_train],
         np.zeros(len(X_train)),
         validation_data=([X_val, y_val, il_val, ll_val], np.zeros(len(X_val))),
-        epochs=1,
-        batch_size=32,
+        epochs=100,
+        batch_size=64,
         callbacks=callbacks,
         verbose=1
     )

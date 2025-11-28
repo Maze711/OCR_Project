@@ -45,21 +45,13 @@ class SaveKerasOnBest(tf.keras.callbacks.Callback):
                 self.last_best_loss = current_loss
 
 if __name__ == "__main__":
-    # Load real samples
+    # Load real samples only
     real_samples = load_samples(
         os.path.join(dataset_dir, "Training", "training_labels.csv"),
         os.path.join(dataset_dir, "Training", "training_words")
     )
-    # Load synthetic samples
-    synthetic_samples = load_samples(
-        os.path.join(dataset_dir, "Synthetic", "synthetic_labels.csv"),
-        os.path.join(dataset_dir, "Synthetic")
-    )
-    # Use only 200 synthetic samples
-    synthetic_samples = synthetic_samples[:100]
+    all_samples = real_samples  # No synthetic samples
 
-    # Combine samples
-    all_samples = real_samples + synthetic_samples
     print(f"Total samples loaded: {len(all_samples)}")
     if len(all_samples) == 0:
         print("No samples found!")
@@ -136,8 +128,8 @@ if __name__ == "__main__":
         [X_train, y_train, il_train, ll_train],
         np.zeros(len(X_train)),
         validation_data=([X_val, y_val, il_val, ll_val], np.zeros(len(X_val))),
-        epochs=100,
-        batch_size=64,
+        epochs=50,
+        batch_size=32,
         callbacks=callbacks,
         verbose=1
     )

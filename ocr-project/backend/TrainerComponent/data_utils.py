@@ -7,7 +7,7 @@ import os
 CHARACTERS = string.ascii_letters + string.digits + " -'.,:"
 NUM_CHARS = len(CHARACTERS)
 BLANK_TOKEN = NUM_CHARS
-IMAGE_WIDTH, IMAGE_HEIGHT = 1024, 64  # Now feature_width = 128
+IMAGE_WIDTH, IMAGE_HEIGHT = 160, 64  # Now feature_width = 128
 
 def ctc_lambda_func(args):
     from tensorflow.keras import backend as K

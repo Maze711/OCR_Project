@@ -13,7 +13,7 @@ import shutil
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 dataset_dir = os.path.join(BASE_DIR, 'ocr_dataset')
-logs_dir = os.path.join(BASE_DIR, 'ocr_logs')
+logs_dir = os.path.join(BASE_DIR, 'logs')
 models_dir = os.path.join(BASE_DIR, 'ocr_modelsv2')
 sample_logs_dir = os.path.join(BASE_DIR, 'sample_logs')
 

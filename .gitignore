@@ -9,4 +9,4 @@ ocr-project/backend/ocr_logs/
 
 ocr-project/backend/sample_logs/
 
-ocr-project/backend/test_images/
+ocr-project/backend/test_images/"ocr-project/backend/ocr_models/*.keras" 

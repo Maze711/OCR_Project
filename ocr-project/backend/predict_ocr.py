@@ -6,15 +6,26 @@ import tensorflow as tf
 # ===============================
 # CONFIGURATION
 # ===============================
-MODEL_PATH = "ocr_modelsv2/ocr_model_production_fp16.tflite"  # TFLite model
-IMAGE_PATH = "test_images"  # Folder containing test/unlabeled images
+MODEL_PATH = "ocr_models/CNN_BiLSTM_v2fp16.tflite"  # TFLite model
+IMAGE_PATH = "ocr_dataset/Training/training_words"  # Folder containing test/unlabeled images
 IMG_HEIGHT = 64  # Height expected by the model
 IMG_WIDTH = 160  # Width expected by the model
 
 # ===============================
 # CHARACTER SET (must match your training setup)
 # ===============================
-characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+characters = ["Aceta", "Ace", "Alatrol", "Amodis", "Atrizin", "Axodin", "Azithrocin",
+            "Azyth", "Az", "Bacaid", "Backtone", "Baclofen", "Baclon", "Bacmax",
+            "Beklo", "Bicozin", "Canazole", "Candinil", "Cetisoft", "Conaz", "Dancel",
+            "Denixil", "Diflu", "Dinafex", "Disopan", "Esonix", "Esoral", "Etizin",
+            "Exium", "Fenadin", "Fexofast", "Fexo", "Filmet", "Fixal", "Flamyd",
+            "Flexibac", "Flexilax", "Flugal", "Ketocon", "Ketoral", "Ketotab",
+            "Ketozol", "Leptic", "Lucan-R", "Lumona", "M-Kast", "Maxima", "Maxpro",
+            "Metro", "Metsina", "Monas", "Montair", "Montene", "Montex", "Napa Extend",
+            "Napa", "Nexcap", "Nexum", "Nidazyl", "Nizoder", "Odmon", "Omastin",
+            "Opton", "Progut", "Provair", "Renova", "Rhinil", "Ritch", "Rivotril",
+            "Romycin", "Rozith", "Sergel", "Tamen", "Telfast", "Tridosil", "Trilock",
+            "Vifas", "Zithrin"]
 char_to_num = tf.keras.layers.StringLookup(vocabulary=list(characters), oov_token="")
 num_to_char = tf.keras.layers.StringLookup(
     vocabulary=char_to_num.get_vocabulary(), invert=True

@@ -10,26 +10,26 @@ def build_ocr_model_tflite_compatible():
     input_img = Input(shape=(IMAGE_HEIGHT, IMAGE_WIDTH, 1), name='input_image')
 
     # CNN feature extractor (separable convs for smaller size)
-    x = SeparableConv2D(32, (3,3), padding='same', activation='relu')(input_img)
+    x = SeparableConv2D(64, (3,3), padding='same', activation='relu')(input_img)  # Updated to 64 filters
     x = BatchNormalization()(x)
     x = MaxPooling2D((2,2))(x)
 
-    x = SeparableConv2D(64, (3,3), padding='same', activation='relu')(x)
+    x = SeparableConv2D(128, (3,3), padding='same', activation='relu')(x)  # Updated to 128 filters
     x = BatchNormalization()(x)
     x = MaxPooling2D((2,2))(x)
 
-    x = SeparableConv2D(64, (3,3), padding='same', activation='relu')(x)
+    x = SeparableConv2D(128, (3,3), padding='same', activation='relu')(x)  # Updated to 128 filters
     x = BatchNormalization()(x)
     x = MaxPooling2D((2,1))(x)
-    x = Dropout(0.2)(x)  # Training only
+    x = Dropout(0.3)(x)  # Updated dropout to 0.3
 
     # Prepare for RNN
     time_steps = IMAGE_WIDTH // 4
-    rnn_input = Reshape((time_steps, 64*8))(x)  # Adjust channels as needed
+    rnn_input = Reshape((time_steps, 128*8))(x)  # Adjusted channels to match updated filters
 
     # Bidirectional GRU
-    x = Bidirectional(GRU(64, return_sequences=True))(rnn_input)
-    x = Bidirectional(GRU(32, return_sequences=True))(x)
+    x = Bidirectional(GRU(128, return_sequences=True, dropout=0.2))(rnn_input)  # Updated GRU units and added dropout
+    x = Bidirectional(GRU(64, return_sequences=True, dropout=0.2))(x)  # Updated GRU units and added dropout
 
     # Output for prediction
     output = Dense(NUM_CHARS + 1, activation='softmax', name='output')(x)
@@ -46,7 +46,7 @@ def build_ocr_model_tflite_compatible():
         outputs=loss_out
     )
     train_model.compile(
-        optimizer=optimizers.Adam(learning_rate=1e-3),
+        optimizer=optimizers.Adam(learning_rate=1e-4),  # Updated learning rate
         loss={'ctc': lambda y_true, y_pred: y_pred}
     )
 

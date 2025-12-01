@@ -54,3 +54,48 @@ def build_ocr_model_tflite_compatible():
     pred_model = tf.keras.models.Model(inputs=input_img, outputs=output)
 
     return train_model, pred_model, time_steps
+
+def layer_summary_table(model):
+    layer_groups = {
+        "Input": [],
+        "CNN": [],
+        "BatchNorm": [],
+        "Pooling": [],
+        "Dropout": [],
+        "Reshape": [],
+        "RNN": [],
+        "Dense": [],
+        "Other": []
+    }
+    for layer in model.layers:
+        name = layer.name
+        ltype = layer.__class__.__name__
+        shape = str(layer.output_shape)
+        params = layer.count_params()
+        if "Input" in ltype:
+            layer_groups["Input"].append((name, shape, params))
+        elif "Conv" in ltype:
+            layer_groups["CNN"].append((name, shape, params))
+        elif "BatchNormalization" in ltype:
+            layer_groups["BatchNorm"].append((name, shape, params))
+        elif "Pooling" in ltype:
+            layer_groups["Pooling"].append((name, shape, params))
+        elif "Dropout" in ltype:
+            layer_groups["Dropout"].append((name, shape, params))
+        elif "Reshape" in ltype:
+            layer_groups["Reshape"].append((name, shape, params))
+        elif "Bidirectional" in ltype or "GRU" in ltype or "LSTM" in ltype:
+            layer_groups["RNN"].append((name, shape, params))
+        elif "Dense" in ltype:
+            layer_groups["Dense"].append((name, shape, params))
+        else:
+            layer_groups["Other"].append((name, shape, params))
+
+    table_md = ""
+    for group, layers in layer_groups.items():
+        if layers:
+            table_md += f"\n### {group} Layers\n"
+            table_md += "| Layer Name | Output Shape | Param # |\n|---|---|---|\n"
+            for name, shape, params in layers:
+                table_md += f"| {name} | {shape} | {params} |\n"
+    return table_md

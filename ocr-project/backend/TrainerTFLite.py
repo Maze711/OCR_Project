@@ -14,7 +14,7 @@ import shutil
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 dataset_dir = os.path.join(BASE_DIR, 'ocr_dataset')
 logs_dir = os.path.join(BASE_DIR, 'ocr_logs')
-models_dir = os.path.join(BASE_DIR, 'ocr_modelsv2')
+models_dir = os.path.join(BASE_DIR, 'ocr_modelsv3')
 sample_logs_dir = os.path.join(BASE_DIR, 'sample_logs')
 
 os.makedirs(dataset_dir, exist_ok=True)
@@ -72,18 +72,18 @@ if __name__ == "__main__":
 
     print(f"Training data: {X_train.shape}")
     print(f"Validation data: {X_val.shape}")
-    # print(X_train.shape, y_train.shape, il_train.shape, ll_train.shape)
-    # print("Max train label length:", np.max(ll_train))
-    # print("Max val label length:", np.max(ll_val))
-    # print("Train samples:", X_train.shape[0])
-    # print("Val samples:", X_val.shape[0])
 
-    # Build TFLite compatible model
+    # Build TFLite compatible model with the new architecture
     train_model, pred_model, time_steps = build_ocr_model_tflite_compatible()
     print(f"📐 Model time steps: {time_steps}")
     print(f"📐 Number of characters: {NUM_CHARS}")
     print(f"📐 Expected output shape: (batch_size, {time_steps}, {NUM_CHARS + 1})")
     print(f"📐 Actual pred_model output shape: {pred_model.output_shape}")
+    
+    # IMPORTANT: Check that input_length matches time_steps
+    print(f"📐 Training input_length shape: {il_train.shape}")
+    print(f"📐 Sample input_length value: {il_train[0][0]}")
+    print(f"📐 Expected input_length: {time_steps}")
 
     # Before defining callbacks
     validation_callback = ValidationCallback(pred_model, X_val, y_val, logs_dir)
@@ -91,13 +91,17 @@ if __name__ == "__main__":
     # Define callbacks
     checkpoint_path = os.path.join(models_dir, "best_model.keras")
     keras_model_path = os.path.join(models_dir, "ocr_model_keras.keras")
+    
+    # Clear previous checkpoints to start fresh with new architecture
     if os.path.exists(checkpoint_path):
-        print("📥 Restoring best model weights for training...")
-        train_model.load_weights(checkpoint_path)
+        print("🔄 Removing old checkpoint for fresh training with new architecture...")
+        os.remove(checkpoint_path)
+    if os.path.exists(keras_model_path):
+        os.remove(keras_model_path)
 
     callbacks = [
         TensorBoard(log_dir=logs_dir, histogram_freq=1),
-        TerminalLogger(validation_callback=validation_callback),  # <-- Pass the callback here
+        TerminalLogger(validation_callback=validation_callback),
         ModelCheckpoint(
             filepath=checkpoint_path,
             save_best_only=True,
@@ -105,7 +109,7 @@ if __name__ == "__main__":
             monitor='val_loss',
             verbose=1
         ),
-        SaveKerasOnBest(checkpoint_path, keras_model_path),  # <-- Add this callback
+        SaveKerasOnBest(checkpoint_path, keras_model_path),
         ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
@@ -113,22 +117,24 @@ if __name__ == "__main__":
             min_lr=1e-6,
             verbose=1
         ),
-        # EarlyStopping(
-        #     monitor='val_loss',
-        #     patience=10,
-        #     restore_best_weights=True
-        # ),
-        validation_callback  # <-- Add this to callbacks if you want TensorBoard metrics
+        EarlyStopping(
+            monitor='val_loss',
+            patience=20,  # Increased patience for CTC training
+            restore_best_weights=True,
+            verbose=1
+        ),
+        validation_callback
     ]
 
-    print("🚀 Starting training...")
+    print("🚀 Starting training with new CTC-optimized architecture...")
     print(f"📊 Logs will be saved to: {logs_dir}")
+    print(f"🎯 Max label length: {time_steps} characters")
 
     history = train_model.fit(
         [X_train, y_train, il_train, ll_train],
         np.zeros(len(X_train)),
         validation_data=([X_val, y_val, il_val, ll_val], np.zeros(len(X_val))),
-        epochs=50,
+        epochs=150,  # Increased epochs for CTC
         batch_size=32,
         callbacks=callbacks,
         verbose=1
@@ -137,20 +143,37 @@ if __name__ == "__main__":
     if os.path.exists(checkpoint_path):
         print("📥 Loading best model...")
         pred_model.load_weights(checkpoint_path)
+    else:
+        print("⚠️ No checkpoint found, saving final model...")
+        pred_model.save(keras_model_path)
 
     # Convert to TFLite
     print("🔄 Converting to TFLite...")
     tflite_path = convert_to_tflite_with_flex(pred_model, models_dir)
 
     # Check TFLite output shape
-    import tensorflow as tf
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
     output_details = interpreter.get_output_details()
-    print(f"📊 TFLite output shape: {output_details[0]['shape']}")  # <-- Add this line
+    print(f"📊 TFLite output shape: {output_details[0]['shape']}")
+    
+    # Verify the shape matches expectations
+    expected_shape = (1, time_steps, NUM_CHARS + 1)
+    actual_shape = tuple(output_details[0]['shape'])
+    if actual_shape == expected_shape:
+        print(f"✅ TFLite output shape matches expected: {expected_shape}")
+    else:
+        print(f"⚠️  TFLite output shape mismatch!")
+        print(f"   Expected: {expected_shape}")
+        print(f"   Got: {actual_shape}")
 
     # Test the TFLite model
     test_tflite_model(tflite_path, X_test)
 
     print(f"✅ Training completed! TFLite model saved to: {tflite_path}")
     print(f"📊 Training logs saved to: {logs_dir}")
+    
+    # Final reminder for Android app
+    print(f"\n📱 IMPORTANT for Android App:")
+    print(f"   Set TIME_STEPS = {time_steps}")
+    print(f"   Set NUM_CLASSES = {NUM_CHARS + 1}")

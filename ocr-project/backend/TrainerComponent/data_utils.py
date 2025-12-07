@@ -7,7 +7,7 @@ import os
 CHARACTERS = string.ascii_letters + string.digits + " -'.,:"
 NUM_CHARS = len(CHARACTERS)
 BLANK_TOKEN = NUM_CHARS
-IMAGE_WIDTH, IMAGE_HEIGHT = 160, 64  # Now feature_width = 128
+IMAGE_WIDTH, IMAGE_HEIGHT = 160, 64
 
 def ctc_lambda_func(args):
     from tensorflow.keras import backend as K
@@ -17,7 +17,10 @@ def ctc_lambda_func(args):
 def prepare_data(samples):
     images = []
     texts = []
-    feature_width = IMAGE_WIDTH // 4
+    
+    # FIXED: time_steps is 20, not 40
+    time_steps = 20  # Must match model_builder.py
+    
     for img_path, text in samples:
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         if img is None:
@@ -25,19 +28,26 @@ def prepare_data(samples):
         img = cv2.resize(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
         img = (img / 255.0).astype(np.float32)
         img = np.expand_dims(img, axis=-1)
+        
         text_labels = [CHARACTERS.index(c) for c in text if c in CHARACTERS]
-        if len(text_labels) > feature_width:
-            print(f"Skipping sample: label too long ({len(text_labels)} > {feature_width}) for {img_path}")
-            continue
+        
+        # Check against correct max_label_length
+        if len(text_labels) > time_steps:
+            print(f"⚠️ Truncating label '{text}' from {len(text_labels)} to {time_steps} chars")
+            text_labels = text_labels[:time_steps]
+        
         images.append(img)
         texts.append(text_labels)
+    
     max_text_len = max(len(t) for t in texts)
     padded_texts = np.ones((len(texts), max_text_len), dtype='int32') * BLANK_TOKEN
     for i, text in enumerate(texts):
         padded_texts[i, :len(text)] = text
-    feature_width = IMAGE_WIDTH // 4
-    input_length = np.ones((len(images), 1), dtype='int32') * feature_width
+    
+    # FIXED: input_length should be time_steps (20)
+    input_length = np.ones((len(images), 1), dtype='int32') * time_steps
     label_length = np.array([[len(t)] for t in texts], dtype='int32')
+    
     return np.array(images), padded_texts, input_length, label_length
 
 def load_samples(label_csv_path, images_folder):

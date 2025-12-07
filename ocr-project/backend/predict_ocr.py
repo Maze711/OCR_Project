@@ -6,8 +6,8 @@ import tensorflow as tf
 # ===============================
 # CONFIGURATION
 # ===============================
-MODEL_PATH = "ocr_models/CNN_BiLSTM_v2fp16.tflite"  # TFLite model
-IMAGE_PATH = "ocr_dataset/Training/training_words"  # Folder containing test/unlabeled images
+MODEL_PATH = "ocr_modelsv3/ocr_model_production_fp16.tflite"  # TFLite model
+IMAGE_PATH = "test_images"  # Folder containing test/unlabeled images
 IMG_HEIGHT = 64  # Height expected by the model
 IMG_WIDTH = 160  # Width expected by the model
 

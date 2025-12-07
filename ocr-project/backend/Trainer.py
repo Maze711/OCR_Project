@@ -12,13 +12,13 @@ import tensorflow as tf
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import (
     Input, Conv2D, MaxPooling2D, Reshape, Bidirectional, LSTM, Dense,   
-    BatchNormalization, SpatialDropout2D, Lambda, Attention
+    BatchNormalization, SpatialDropout2D, Lambda, Attention, Layer
 )
 from tensorflow.keras.callbacks import (
     TensorBoard, ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 )
 from tensorflow.keras import backend as K
-from tensorflow_addons.optimizers import AdamW
+from tensorflow.keras.optimizers import AdamW
 from PIL import Image, ImageDraw, ImageFont
 
 CHARACTERS = string.ascii_letters + string.digits + " -'.,:"
@@ -39,13 +39,14 @@ os.makedirs(models_dir, exist_ok=True)
 os.makedirs(sample_logs_dir, exist_ok=True)
 
 
-class AttentionLayer(tf.keras.layers.Layer):
+@tf.keras.utils.register_keras_serializable(package="Custom", name="AttentionLayer")
+class AttentionLayer(Layer):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.attention = Attention()
+        super(AttentionLayer, self).__init__(**kwargs)
 
     def call(self, inputs):
-        return self.attention([inputs, inputs])
+        # Define the logic for the AttentionLayer here
+        pass
 
 
 def ctc_lambda_func(args):

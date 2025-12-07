@@ -5,7 +5,7 @@ import tensorflow as tf
 from tensorflow.keras.callbacks import (
     TensorBoard, ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 )
-from TrainerComponent.model_builder import build_ocr_model_tflite_compatible
+from TrainerComponent.model_builder import build_ocr_model_tflite_compatible, layer_summary_table
 from TrainerComponent.data_utils import prepare_data, load_samples, NUM_CHARS, IMAGE_WIDTH, IMAGE_HEIGHT
 from TrainerComponent.callbacks import TerminalLogger, ValidationCallback
 from TrainerComponent.tflite_utils import convert_to_tflite_with_flex, test_tflite_model
@@ -84,6 +84,14 @@ if __name__ == "__main__":
     print(f"📐 Training input_length shape: {il_train.shape}")
     print(f"📐 Sample input_length value: {il_train[0][0]}")
     print(f"📐 Expected input_length: {time_steps}")
+
+    # Log the layer summary table to TensorBoard
+    import tensorflow as tf
+    with tf.summary.create_file_writer(logs_dir).as_default():
+        tf.summary.text("Model Layer Summary", layer_summary_table(pred_model), step=0)
+
+    # Optionally, print to terminal
+    print(layer_summary_table(pred_model))
 
     # Before defining callbacks
     validation_callback = ValidationCallback(pred_model, X_val, y_val, logs_dir)

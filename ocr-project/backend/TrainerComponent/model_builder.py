@@ -83,3 +83,33 @@ def build_ocr_model_tflite_compatible():
     print(f"Expected max label length: {time_steps}")
     
     return train_model, pred_model, time_steps
+
+def layer_summary_table(model):
+    """
+    Generate a summary table of the layers in the model using model.summary().
+    Args:
+        model: The Keras model object.
+    Returns:
+        A string containing the summary table in markdown format.
+    """
+    from io import StringIO
+    summary_lines = []
+    summary_lines.append("| Layer Name | Output Shape | Parameters |")
+    summary_lines.append("|------------|--------------|------------|")
+
+    # Capture model.summary() output
+    stream = StringIO()
+    model.summary(print_fn=lambda x: stream.write(x + "\n"))
+    summary_output = stream.getvalue().split("\n")
+
+    # Parse the summary output to extract layer details
+    for line in summary_output:
+        if "│" in line:  # Look for table rows in the summary
+            parts = line.split("│")
+            if len(parts) >= 4:
+                layer_name = parts[1].strip()
+                output_shape = parts[2].strip()
+                num_params = parts[3].strip()
+                summary_lines.append(f"| {layer_name} | {output_shape} | {num_params} |")
+
+    return "\n".join(summary_lines)

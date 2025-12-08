@@ -75,10 +75,21 @@ if __name__ == "__main__":
 
     # Build TFLite compatible model with the new architecture
     train_model, pred_model, time_steps = build_ocr_model_tflite_compatible()
-    print(f"📐 Model time steps: {time_steps}")
-    print(f"📐 Number of characters: {NUM_CHARS}")
-    print(f"📐 Expected output shape: (batch_size, {time_steps}, {NUM_CHARS + 1})")
-    print(f"📐 Actual pred_model output shape: {pred_model.output_shape}")
+
+    # Build the model by passing a sample input
+    sample_input = np.zeros((1, IMAGE_HEIGHT, IMAGE_WIDTH, 1), dtype=np.float32)
+    pred_model(sample_input)  # Ensures the model is built and output shapes are computed
+
+    # Print model summary to the terminal
+    print("🔍 Model Summary:")
+    pred_model.summary()
+
+    # Log the layer summary table to TensorBoard
+    with tf.summary.create_file_writer(logs_dir).as_default():
+        tf.summary.text("Model Layer Summary", layer_summary_table(pred_model), step=0)
+
+    # Optionally, print to terminal
+    print(layer_summary_table(pred_model))
     
     # IMPORTANT: Check that input_length matches time_steps
     print(f"📐 Training input_length shape: {il_train.shape}")
@@ -86,7 +97,6 @@ if __name__ == "__main__":
     print(f"📐 Expected input_length: {time_steps}")
 
     # Log the layer summary table to TensorBoard
-    import tensorflow as tf
     with tf.summary.create_file_writer(logs_dir).as_default():
         tf.summary.text("Model Layer Summary", layer_summary_table(pred_model), step=0)
 
